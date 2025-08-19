@@ -3,10 +3,10 @@
 #########################
 
 build: enums
-	CGO_ENABLED=0 go build -o _out/kpsync ./cmd/kpsync
+	CGO_ENABLED=0 go build -o _out/kpsync ./cmd/cli
 
 run: build
-	./_out/ffsclient
+	./_out/kpsync
 
 clean:
 	go clean

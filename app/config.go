@@ -1,4 +1,4 @@
-package kpsync
+package app
 
 import (
 	"encoding/json"
@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
-	"mikescher.com/kpsync/log"
 )
 
 type Config struct {
@@ -21,10 +20,12 @@ type Config struct {
 
 	WorkDir string `json:"work_dir"`
 
+	ForceColors bool `json:"force_colors"`
+
 	Debounce int `json:"debounce"`
 }
 
-func LoadConfig() Config {
+func (app *Application) loadConfig() (Config, string) {
 	var configPath string
 	flag.StringVar(&configPath, "config", "~/.config/kpsync.json", "Path to the configuration file")
 
@@ -46,12 +47,15 @@ func LoadConfig() Config {
 	var debounce int
 	flag.IntVar(&debounce, "debounce", 0, "Debounce before sync (in seconds)")
 
+	var forceColors bool
+	flag.BoolVar(&forceColors, "color", false, "Force color-output (default: auto-detect)")
+
 	flag.Parse()
 
 	if strings.HasPrefix(configPath, "~") {
 		usr, err := user.Current()
 		if err != nil {
-			log.FatalErr("Failed to query users home directory", err)
+			app.LogFatalErr("Failed to query users home directory", err)
 		}
 		fmt.Println(usr.HomeDir)
 
@@ -67,18 +71,19 @@ func LoadConfig() Config {
 			LocalFallback: "",
 			WorkDir:       "/tmp/kpsync",
 			Debounce:      3500,
+			ForceColors:   false,
 		}, "", "    ")), 0644)
 	}
 
 	cfgBin, err := os.ReadFile(configPath)
 	if err != nil {
-		log.FatalErr("Failed to read config file from "+configPath, err)
+		app.LogFatalErr("Failed to read config file from "+configPath, err)
 	}
 
 	var cfg Config
 	err = json.Unmarshal(cfgBin, &cfg)
 	if err != nil {
-		log.FatalErr("Failed to parse config file from "+configPath, err)
+		app.LogFatalErr("Failed to parse config file from "+configPath, err)
 	}
 
 	if webdavURL != "" {
@@ -99,6 +104,9 @@ func LoadConfig() Config {
 	if debounce > 0 {
 		cfg.Debounce = debounce
 	}
+	if forceColors {
+		cfg.ForceColors = forceColors
+	}
 
-	return cfg
+	return cfg, configPath
 }

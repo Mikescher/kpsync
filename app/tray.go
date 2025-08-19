@@ -13,14 +13,22 @@ func (app *Application) initTray() {
 		systray.SetTitle("KeepassXC Sync")
 		systray.SetTooltip("Initializing...")
 
-		app.trayReady = true
+		app.LogDebug("SysTray initialized")
+		app.LogLine()
+
+		app.trayReady.Set(true)
 	}
 
 	systray.Run(trayOnReady, nil)
+
+	app.LogDebug("SysTray stopped")
+	app.LogLine()
+
+	app.trayReady.Set(false)
 }
 
 func (app *Application) setTrayState(txt string, icon []byte) func() {
-	if !app.trayReady {
+	if !app.trayReady.Get() {
 		return func() {}
 	}
 
@@ -34,7 +42,7 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 		app.masterLock.Lock()
 		defer app.masterLock.Unlock()
 
-		if !app.trayReady {
+		if !app.trayReady.Get() {
 			return
 		}
 
@@ -46,7 +54,7 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 }
 
 func (app *Application) setTrayStateDirect(txt string, icon []byte) {
-	if !app.trayReady {
+	if !app.trayReady.Get() {
 		return
 	}
 

@@ -9,7 +9,6 @@ import (
 	"git.blackforestbytes.com/BlackForestBytes/goext/cryptext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
 	"github.com/shirou/gopsutil/v3/process"
-	"mikescher.com/kpsync/log"
 )
 
 func fileExists(p string) bool {
@@ -78,10 +77,10 @@ func (app *Application) calcLocalChecksum() (string, error) {
 	return cryptext.BytesSha256(bin), nil
 }
 
-func isKeepassRunning() bool {
+func (app *Application) isKeepassRunning() bool {
 	proc, err := process.Processes()
 	if err != nil {
-		log.LogError("failed to query existing keepass process", err)
+		app.LogError("failed to query existing keepass process", err)
 		return false
 	}
 
