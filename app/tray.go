@@ -38,9 +38,15 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 	systray.SetIcon(icon)
 	systray.SetTooltip(txt)
 
+	var finDone = false
+
 	fin := func() {
 		app.masterLock.Lock()
 		defer app.masterLock.Unlock()
+
+		if finDone {
+			return
+		}
 
 		if !app.trayReady.Get() {
 			return
@@ -48,6 +54,8 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 
 		systray.SetIcon(assets.IconDefault)
 		systray.SetTooltip("Sleeping...")
+
+		finDone = true
 	}
 
 	return fin

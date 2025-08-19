@@ -16,11 +16,19 @@ import (
 	"mikescher.com/kpsync/assets"
 )
 
-func (app *Application) initSync() error {
+type InitSyncResponse string //@enum:type
+
+const (
+	InitSyncResponseOkay     InitSyncResponse = "OKAY"
+	InitSyncResponseFallback InitSyncResponse = "FALLBACK"
+	InitSyncResponseAbort    InitSyncResponse = "ABORT"
+)
+
+func (app *Application) initSync() (InitSyncResponse, error) {
 
 	err := os.MkdirAll(app.config.WorkDir, os.ModePerm)
 	if err != nil {
-		return exerr.Wrap(err, "").Build()
+		return "", exerr.Wrap(err, "").Build()
 	}
 
 	app.dbFile = path.Join(app.config.WorkDir, path.Base(app.config.LocalFallback))
@@ -28,7 +36,7 @@ func (app *Application) initSync() error {
 
 	if app.isKeepassRunning() {
 		app.LogError("keepassxc is already running!", nil)
-		return exerr.New(exerr.TypeInternal, "keepassxc is already running").Build()
+		return "", exerr.New(exerr.TypeInternal, "keepassxc is already running").Build()
 	}
 
 	state := app.readState()
@@ -89,20 +97,42 @@ func (app *Application) initSync() error {
 			return nil
 		}()
 		if err != nil {
-			return exerr.Wrap(err, "").Build()
+
+			r, err := app.showChoiceNotification("Failed to download remote database.\nUse local fallback?", map[string]string{"y": "Yes", "n": "Abort"})
+			if err != nil {
+				app.LogError("Failed to show choice notification", err)
+				return "", exerr.Wrap(err, "Failed to show choice notification").Build()
+			}
+
+			if r == "y" {
+				return InitSyncResponseFallback, nil
+			} else if r == "n" {
+				return InitSyncResponseAbort, nil
+			} else {
+				return "", exerr.Wrap(err, "").Build()
+			}
+
 		}
+
+		return InitSyncResponseOkay, nil
+
 	} else {
 		app.LogInfo(fmt.Sprintf("Skip download - use existing local database %s", app.dbFile))
 		app.LogLine()
-	}
 
-	return nil
+		return InitSyncResponseOkay, nil
+	}
 }
 
-func (app *Application) runKeepass() {
+func (app *Application) runKeepass(fallback bool) {
 	app.LogInfo("Starting keepassxc...")
 
-	cmd := exec.Command("keepassxc", app.dbFile)
+	filePath := app.dbFile
+	if fallback {
+		filePath = app.config.LocalFallback
+	}
+
+	cmd := exec.Command("keepassxc", filePath)
 
 	go func() {
 		select {
@@ -138,7 +168,7 @@ func (app *Application) runKeepass() {
 	if errors.As(err, &exitErr) {
 
 		app.LogInfo(fmt.Sprintf("keepass exited with code %d", exitErr.ExitCode()))
-		app.sigStopChan <- true
+		app.sigKPExitChan <- true
 		return
 
 	}
@@ -152,7 +182,7 @@ func (app *Application) runKeepass() {
 	app.LogInfo("keepassxc exited successfully")
 	app.LogLine()
 
-	app.sigStopChan <- true
+	app.sigKPExitChan <- true
 	return
 
 }
@@ -190,65 +220,152 @@ func (app *Application) runSyncLoop() error {
 				continue
 			}
 
-			func() {
-				app.masterLock.Lock()
-				app.uploadRunning.Wait(false)
-				app.uploadRunning.Set(true)
-				app.masterLock.Unlock()
-
-				defer app.uploadRunning.Set(false)
-
-				app.LogInfo("Database file was modified")
-				app.LogInfo(fmt.Sprintf("Sleeping for %d seconds", app.config.Debounce))
-
-				time.Sleep(timeext.FromSeconds(app.config.Debounce))
-
-				state := app.readState()
-				localCS, err := app.calcLocalChecksum()
-				if err != nil {
-					app.LogError("Failed to calculate local database checksum", err)
-					app.showErrorNotification("Failed to calculate local database checksum")
-					return
-				}
-
-				if localCS == state.Checksum {
-					app.LogInfo("Local database still matches remote (via checksum) - no need to upload")
-					app.LogInfo(fmt.Sprintf("Checksum (remote/cached) := %s", state.Checksum))
-					app.LogInfo(fmt.Sprintf("Checksum (local)         := %s", localCS))
-					return
-				}
-
-				etag, lm, sha, sz, err := app.uploadDatabase(langext.Ptr(state.ETag))
-				if errors.Is(err, ETagConflictError) {
-
-					//TODO - choice notification
-
-				} else if err != nil {
-					app.LogError("Failed to upload remote database", err)
-					app.showErrorNotification("Failed to upload remote database")
-					return
-				}
-
-				app.LogInfo(fmt.Sprintf("Uploaded database to remote"))
-				app.LogDebug(fmt.Sprintf("Checksum     := %s", sha))
-				app.LogDebug(fmt.Sprintf("ETag         := %s", etag))
-				app.LogDebug(fmt.Sprintf("Size         := %s (%d)", langext.FormatBytes(sz), sz))
-				app.LogDebug(fmt.Sprintf("LastModified := %s", lm.Format(time.RFC3339)))
-
-				err = app.saveState(etag, lm, sha, sz)
-				if err != nil {
-					app.LogError("Failed to save state", err)
-					app.showErrorNotification("Failed to save state")
-					return
-				}
-
-				app.showSuccessNotification("Uploaded database successfully")
-
-				app.LogLine()
-			}()
+			app.onDBFileChanged()
 
 		case err := <-watcher.Errors:
 			app.LogError("Filewatcher reported an error", err)
 		}
 	}
+}
+
+func (app *Application) onDBFileChanged() {
+	app.masterLock.Lock()
+	app.uploadRunning.Wait(false)
+	app.uploadRunning.Set(true)
+	app.masterLock.Unlock()
+
+	defer app.uploadRunning.Set(false)
+
+	fin1 := app.setTrayState("Uploading database", assets.IconUpload)
+	defer fin1()
+
+	app.LogInfo("Database file was modified")
+	app.LogInfo(fmt.Sprintf("Sleeping for %d seconds", app.config.Debounce))
+
+	time.Sleep(timeext.FromSeconds(app.config.Debounce))
+
+	state := app.readState()
+	localCS, err := app.calcLocalChecksum()
+	if err != nil {
+		app.LogError("Failed to calculate local database checksum", err)
+		app.showErrorNotification("KeePassSync: Error", "Failed to calculate local database checksum")
+		return
+	}
+
+	if state != nil && localCS == state.Checksum {
+		app.LogInfo("Local database still matches remote (via checksum) - no need to upload")
+		app.LogInfo(fmt.Sprintf("Checksum (remote/cached) := %s", state.Checksum))
+		app.LogInfo(fmt.Sprintf("Checksum (local)         := %s", localCS))
+		return
+	}
+
+	app.LogInfo("Uploading database to remote")
+
+	var eTagPtr *string = nil
+	if state != nil {
+		eTagPtr = langext.Ptr(state.ETag)
+	}
+
+	etag, lm, sha, sz, err := app.uploadDatabase(eTagPtr)
+	if errors.Is(err, ETagConflictError) {
+
+		fin1()
+		fin2 := app.setTrayState("Uploading database (conflict", assets.IconUploadConflict)
+		defer fin2()
+
+		r, err := app.showChoiceNotification("KeePassSync: Upload failed", "Conflict with remote file.\n[1] Overwrite remote file\n[2] Download remote and sync manually", map[string]string{"o": "Overwrite", "d": "Download", "a": "Abort"})
+		if err != nil {
+			app.LogError("Failed to show choice notification", err)
+			return
+		}
+
+		if r == "o" {
+
+			app.LogInfo("Uploading database to remote (unchecked)")
+
+			etag, lm, sha, sz, err := app.uploadDatabase(nil) // unchecked upload
+			if err != nil {
+				app.LogError("Failed to upload remote database", err)
+				app.showErrorNotification("KeePassSync: Error", "Failed to upload remote database")
+				return
+			}
+
+			app.LogInfo(fmt.Sprintf("Uploaded database to remote"))
+			app.LogDebug(fmt.Sprintf("Checksum     := %s", sha))
+			app.LogDebug(fmt.Sprintf("ETag         := %s", etag))
+			app.LogDebug(fmt.Sprintf("Size         := %s (%d)", langext.FormatBytes(sz), sz))
+			app.LogDebug(fmt.Sprintf("LastModified := %s", lm.Format(time.RFC3339)))
+
+			err = app.saveState(etag, lm, sha, sz)
+			if err != nil {
+				app.LogError("Failed to save state", err)
+				app.showErrorNotification("KeePassSync: Error", "Failed to save state")
+				return
+			}
+
+			app.showSuccessNotification("KeePassSync", "Uploaded database successfully (overwrite remote)")
+
+			app.LogLine()
+
+			return
+
+		} else if r == "d" {
+
+			app.LogInfo(fmt.Sprintf("Re-Downloading remote database to %s", app.dbFile))
+
+			etag, lm, sha, sz, err := app.downloadDatabase()
+			if err != nil {
+				app.LogError("Failed to download remote database", err)
+				return
+			}
+
+			app.LogInfo(fmt.Sprintf("Downloaded remote database to %s", app.dbFile))
+			app.LogInfo(fmt.Sprintf("Checksum     := %s", sha))
+			app.LogInfo(fmt.Sprintf("ETag         := %s", etag))
+			app.LogInfo(fmt.Sprintf("Size         := %s (%d)", langext.FormatBytes(sz), sz))
+			app.LogInfo(fmt.Sprintf("LastModified := %s", lm.Format(time.RFC3339)))
+
+			err = app.saveState(etag, lm, sha, sz)
+			if err != nil {
+				app.LogError("Failed to save state", err)
+				return
+			}
+
+			app.showSuccessNotification("KeePassSync", "Re-Downloaded database successfully")
+
+			app.LogLine()
+
+		} else if r == "a" {
+
+			app.sigManualStopChan <- true
+			return
+
+		} else {
+			app.LogError("Unknown choice in notification: '"+r+"'", nil)
+			app.showErrorNotification("KeePassSync: Error", "Unknown choice in notification: '"+r+"'")
+			return
+		}
+
+	} else if err != nil {
+		app.LogError("Failed to upload remote database", err)
+		app.showErrorNotification("KeePassSync: Error", "Failed to upload remote database")
+		return
+	}
+
+	app.LogInfo(fmt.Sprintf("Uploaded database to remote"))
+	app.LogDebug(fmt.Sprintf("Checksum     := %s", sha))
+	app.LogDebug(fmt.Sprintf("ETag         := %s", etag))
+	app.LogDebug(fmt.Sprintf("Size         := %s (%d)", langext.FormatBytes(sz), sz))
+	app.LogDebug(fmt.Sprintf("LastModified := %s", lm.Format(time.RFC3339)))
+
+	err = app.saveState(etag, lm, sha, sz)
+	if err != nil {
+		app.LogError("Failed to save state", err)
+		app.showErrorNotification("KeePassSync: Error", "Failed to save state")
+		return
+	}
+
+	app.showSuccessNotification("KeePassSync: Error", "Uploaded database successfully")
+
+	app.LogLine()
 }

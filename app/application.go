@@ -24,8 +24,9 @@ type Application struct {
 	syncLoopRunning *syncext.AtomicBool
 	keepassRunning  *syncext.AtomicBool
 
-	sigStopChan chan bool  // keepass exited
-	sigErrChan  chan error // fatal error
+	sigKPExitChan     chan bool  // keepass exited
+	sigManualStopChan chan bool  // manual stop
+	sigErrChan        chan error // fatal error
 
 	sigSyncLoopStopChan chan bool // stop sync loop
 	sigTermKeepassChan  chan bool // stop keepass
@@ -42,7 +43,8 @@ func NewApplication() *Application {
 		trayReady:           syncext.NewAtomicBool(false),
 		syncLoopRunning:     syncext.NewAtomicBool(false),
 		keepassRunning:      syncext.NewAtomicBool(false),
-		sigStopChan:         make(chan bool, 128),
+		sigKPExitChan:       make(chan bool, 128),
+		sigManualStopChan:   make(chan bool, 128),
 		sigErrChan:          make(chan error, 128),
 		sigSyncLoopStopChan: make(chan bool, 128),
 		sigTermKeepassChan:  make(chan bool, 128),
@@ -77,28 +79,54 @@ func (app *Application) Run() {
 		app.syncLoopRunning = syncext.NewAtomicBool(true)
 		defer app.syncLoopRunning.Set(false)
 
-		err := app.initSync()
+		isr, err := app.initSync()
 		if err != nil {
 			app.sigErrChan <- err
 			return
 		}
 
-		go func() {
-			app.keepassRunning = syncext.NewAtomicBool(true)
-			defer app.keepassRunning.Set(false)
+		if isr == InitSyncResponseAbort {
+			app.sigManualStopChan <- true
+			return
+		} else if isr == InitSyncResponseOkay {
 
-			app.runKeepass()
-		}()
+			go func() {
+				app.keepassRunning = syncext.NewAtomicBool(true)
+				defer app.keepassRunning.Set(false)
 
-		time.Sleep(1 * time.Second)
+				app.runKeepass(false)
+			}()
 
-		app.setTrayStateDirect("Sleeping...", assets.IconDefault)
+			time.Sleep(1 * time.Second)
 
-		err = app.runSyncLoop()
-		if err != nil {
-			app.sigErrChan <- err
+			app.setTrayStateDirect("Sleeping...", assets.IconDefault)
+
+			err = app.runSyncLoop()
+			if err != nil {
+				app.sigErrChan <- err
+				return
+			}
+
+		} else if isr == InitSyncResponseFallback {
+
+			app.LogInfo(fmt.Sprintf("Starting KeepassXC with local fallback database (without sync loop!)"))
+			app.LogDebug(fmt.Sprintf("DB-Path := '%s'", app.config.LocalFallback))
+
+			go func() {
+				app.keepassRunning = syncext.NewAtomicBool(true)
+				defer app.keepassRunning.Set(false)
+
+				app.runKeepass(true)
+			}()
+
+			app.setTrayStateDirect("Sleeping...", assets.IconDefault)
+
+		} else {
+			app.LogError("Unknown InitSyncResponse: "+string(isr), nil)
+			app.sigErrChan <- fmt.Errorf("unknown InitSyncResponse: %s", isr)
 			return
 		}
+
 	}()
 
 	sigTerm := make(chan os.Signal, 1)
@@ -111,7 +139,7 @@ func (app *Application) Run() {
 
 		app.stopBackgroundRoutines()
 
-		// TODO try final sync
+		// TODO try final sync (?)
 
 	case err := <-app.sigErrChan: // fatal error
 
@@ -121,9 +149,17 @@ func (app *Application) Run() {
 
 		app.LogError("Stopped due to error: "+err.Error(), nil)
 
-		// TODO stop?
+		return
 
-	case _ = <-app.sigStopChan: // keepass exited
+	case <-app.sigManualStopChan: // manual
+
+		app.LogInfo("Stopping application (manual)")
+
+		app.stopBackgroundRoutines()
+
+		return
+
+	case _ = <-app.sigKPExitChan: // keepass exited
 
 		app.LogInfo("Stopping application (received STOP)")
 
