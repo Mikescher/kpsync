@@ -4,7 +4,7 @@ import (
 	_ "embed"
 )
 
-//go:embed IconInit.png
+//go:embed iconInit.png
 var IconInit []byte
 
 //go:embed iconDefault.png

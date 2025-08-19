@@ -48,26 +48,26 @@ func LoadConfig() Config {
 
 	flag.Parse()
 
-	if strings.HasSuffix(configPath, "~") {
+	if strings.HasPrefix(configPath, "~") {
 		usr, err := user.Current()
 		if err != nil {
 			log.FatalErr("Failed to query users home directory", err)
 		}
 		fmt.Println(usr.HomeDir)
 
-		configPath = strings.TrimSuffix(configPath, "~")
+		configPath = strings.TrimPrefix(configPath, "~")
 		configPath = fmt.Sprintf("%s/%s", usr.HomeDir, configPath)
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) && configPath != "" {
-		_ = os.WriteFile(configPath, langext.Must(json.Marshal(Config{
+		_ = os.WriteFile(configPath, langext.Must(json.MarshalIndent(Config{
 			WebDAVURL:     "https://your-nextcloud-domain.example/remote.php/dav/files/keepass.kdbx",
 			WebDAVUser:    "",
 			WebDAVPass:    "",
 			LocalFallback: "",
 			WorkDir:       "/tmp/kpsync",
 			Debounce:      3500,
-		})), 0644)
+		}, "", "    ")), 0644)
 	}
 
 	cfgBin, err := os.ReadFile(configPath)

@@ -1,5 +1,9 @@
 package log
 
+import (
+	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
+)
+
 //TODO
 
 func Fatal(msg string) {
@@ -8,15 +12,20 @@ func Fatal(msg string) {
 
 func FatalErr(msg string, err error) {
 	if err != nil {
-		panic("ERROR: " + msg + "\n" + err.Error())
+		println("FATAL: " + msg)
+		println("       " + err.Error())
+		println(exerr.FromError(err).FormatLog(exerr.LogPrintOverview))
+		panic(0)
 	} else {
-		panic("ERROR: " + msg)
+		panic("FATAL: " + msg)
 	}
 }
 
 func LogError(msg string, err error) {
 	if err != nil {
-		println("ERROR: " + msg + "\n" + err.Error())
+		println("ERROR: " + msg)
+		println("       " + err.Error())
+		println(exerr.FromError(err).FormatLog(exerr.LogPrintOverview))
 	} else {
 		println("ERROR: " + msg)
 	}

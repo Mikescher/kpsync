@@ -36,3 +36,5 @@ atlassian-ide-plugin.xml
 
 
 _out/*
+
+script_old.sh
