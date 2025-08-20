@@ -16,19 +16,27 @@ func (app *Application) initTray() {
 
 		systray.SetIcon(assets.IconInit)
 		systray.SetTitle("KeepassXC Sync")
-		app.currSysTrayTooltip = "Initializing..."
+		app.currSysTrayTooltip = "KPSync | " + "Initializing..."
 		systray.SetTooltip(app.currSysTrayTooltip)
 
 		miSync := systray.AddMenuItem("Sync Now (checked)", "")
 		miSyncForce := systray.AddMenuItem("Sync Now (forced)", "")
 		miShowLogFifo := systray.AddMenuItem("Show Log (fifo)", "")
 		miShowLogFile := systray.AddMenuItem("Show Log (file)", "")
-		systray.AddMenuItem("", "")
+
+		systray.AddMenuItem("", "").Disable()
+
 		app.trayItemChecksum = systray.AddMenuItem("Checksum: {...}", "")
 		app.trayItemETag = systray.AddMenuItem("ETag: {...}", "")
 		app.trayItemLastModified = systray.AddMenuItem("LastModified: {...}", "")
-		systray.AddMenuItem("", "")
+
+		systray.AddMenuItem("", "").Disable()
+
 		miQuit := systray.AddMenuItem("Quit", "")
+
+		app.trayItemChecksum.Disable()
+		app.trayItemETag.Disable()
+		app.trayItemLastModified.Disable()
 
 		app.LogDebug("SysTray initialized")
 		app.LogLine()
@@ -87,7 +95,8 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 	defer app.masterLock.Unlock()
 
 	systray.SetIcon(icon)
-	systray.SetTooltip(txt)
+	app.currSysTrayTooltip = "KPSync | " + txt
+	systray.SetTooltip(app.currSysTrayTooltip)
 
 	var finDone = false
 
@@ -104,7 +113,7 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 		}
 
 		systray.SetIcon(assets.IconDefault)
-		app.currSysTrayTooltip = "Sleeping..."
+		app.currSysTrayTooltip = "KPSync | " + "Sleeping..."
 		systray.SetTooltip(app.currSysTrayTooltip)
 
 		finDone = true
@@ -122,7 +131,9 @@ func (app *Application) setTrayStateDirect(txt string, icon []byte) {
 	defer app.masterLock.Unlock()
 
 	systray.SetIcon(icon)
-	systray.SetTooltip(txt)
+
+	app.currSysTrayTooltip = "KPSync | " + txt
+	systray.SetTooltip(app.currSysTrayTooltip)
 }
 
 func (app *Application) setTrayTooltip(txt string) {
@@ -134,6 +145,6 @@ func (app *Application) setTrayTooltip(txt string) {
 	defer app.masterLock.Unlock()
 
 	systray.SetTooltip(txt)
-	app.currSysTrayTooltip = txt
+	app.currSysTrayTooltip = "KPSync | " + txt
 	systray.SetTooltip(app.currSysTrayTooltip)
 }
