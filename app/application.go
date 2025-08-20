@@ -33,6 +33,12 @@ type Application struct {
 
 	dbFile    string
 	stateFile string
+
+	currSysTrayTooltop string
+
+	trayItemChecksum     *systray.MenuItem
+	trayItemETag         *systray.MenuItem
+	trayItemLastModified *systray.MenuItem
 }
 
 func NewApplication() *Application {
@@ -68,15 +74,14 @@ func (app *Application) Run() {
 	app.LogDebug(fmt.Sprintf("WebDAVPass    := '%s'", app.config.WebDAVPass))
 	app.LogDebug(fmt.Sprintf("LocalFallback := '%s'", app.config.LocalFallback))
 	app.LogDebug(fmt.Sprintf("WorkDir       := '%s'", app.config.WorkDir))
-	app.LogDebug(fmt.Sprintf("ForceColors   := %v", app.config.ForceColors))
-	app.LogDebug(fmt.Sprintf("Debounce      := %d", app.config.Debounce))
+	app.LogDebug(fmt.Sprintf("Debounce      := %d ms", app.config.Debounce))
 	app.LogDebug(fmt.Sprintf("ForceColors   := %v", app.config.ForceColors))
 	app.LogLine()
 
 	go func() { app.initTray() }()
 
 	go func() {
-		app.syncLoopRunning = syncext.NewAtomicBool(true)
+		app.syncLoopRunning.Set(true)
 		defer app.syncLoopRunning.Set(false)
 
 		isr, err := app.initSync()
@@ -91,7 +96,7 @@ func (app *Application) Run() {
 		} else if isr == InitSyncResponseOkay {
 
 			go func() {
-				app.keepassRunning = syncext.NewAtomicBool(true)
+				app.keepassRunning.Set(true)
 				defer app.keepassRunning.Set(false)
 
 				app.runKeepass(false)
@@ -113,7 +118,7 @@ func (app *Application) Run() {
 			app.LogDebug(fmt.Sprintf("DB-Path := '%s'", app.config.LocalFallback))
 
 			go func() {
-				app.keepassRunning = syncext.NewAtomicBool(true)
+				app.keepassRunning.Set(true)
 				defer app.keepassRunning.Set(false)
 
 				app.runKeepass(true)
@@ -139,7 +144,9 @@ func (app *Application) Run() {
 
 		app.stopBackgroundRoutines()
 
-		// TODO try final sync (?)
+		app.runFinalSync()
+
+		return
 
 	case err := <-app.sigErrChan: // fatal error
 
@@ -165,7 +172,9 @@ func (app *Application) Run() {
 
 		app.stopBackgroundRoutines()
 
-		// TODO try final sync
+		app.runFinalSync()
+
+		return
 
 	}
 }

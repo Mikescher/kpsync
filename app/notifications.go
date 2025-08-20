@@ -40,7 +40,7 @@ func (app *Application) showSuccessNotification(msg string, body string) {
 
 	res, err := cmdext.
 		Runner("notify-send").
-		Arg("--urgency=normal").
+		Arg("--urgency=critical").
 		Arg("--app-name=kpsync").
 		Arg("--print-id").
 		Arg(msg).
@@ -74,7 +74,7 @@ func (app *Application) showChoiceNotification(msg string, body string, options 
 		bldr = bldr.Arg("--action=" + kOpt + "=" + vOpt)
 	}
 
-	bldr = bldr.Arg(msg)
+	bldr = bldr.Arg(msg).Arg(body)
 
 	res, err := bldr.Run()
 	if err != nil {

@@ -17,3 +17,5 @@
 
  - colorful log
  - download/upload progress log
+
+ - logfile in workdir

@@ -2,12 +2,14 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/cryptext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
+	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -63,6 +65,16 @@ func (app *Application) saveState(eTag string, lastModified time.Time, checksum 
 	err = os.WriteFile(app.stateFile, bin, 0644)
 	if err != nil {
 		return exerr.Wrap(err, "Failed to write state file").Build()
+	}
+
+	if app.trayItemChecksum != nil {
+		app.trayItemChecksum.SetTitle(fmt.Sprintf("Checksum: %s", checksum))
+	}
+	if app.trayItemETag != nil {
+		app.trayItemETag.SetTitle(fmt.Sprintf("ETag: %s", eTag))
+	}
+	if app.trayItemLastModified != nil {
+		app.trayItemLastModified.SetTitle(fmt.Sprintf("LastModified: %s", lastModified.In(timeext.TimezoneBerlin).Format(time.RFC3339)))
 	}
 
 	return nil

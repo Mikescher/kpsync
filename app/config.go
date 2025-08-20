@@ -3,9 +3,9 @@ package app
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"os"
 	"os/user"
+	"path"
 	"strings"
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
@@ -57,10 +57,9 @@ func (app *Application) loadConfig() (Config, string) {
 		if err != nil {
 			app.LogFatalErr("Failed to query users home directory", err)
 		}
-		fmt.Println(usr.HomeDir)
 
 		configPath = strings.TrimPrefix(configPath, "~")
-		configPath = fmt.Sprintf("%s/%s", usr.HomeDir, configPath)
+		configPath = path.Join(usr.HomeDir, configPath)
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) && configPath != "" {

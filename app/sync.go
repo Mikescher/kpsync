@@ -36,6 +36,7 @@ func (app *Application) initSync() (InitSyncResponse, error) {
 
 	if app.isKeepassRunning() {
 		app.LogError("keepassxc is already running!", nil)
+		app.showErrorNotification("KeePassSync: Error", "An keepassxc instance is already running!\nPlease close it before starting kpsync.")
 		return "", exerr.New(exerr.TypeInternal, "keepassxc is already running").Build()
 	}
 
@@ -98,7 +99,7 @@ func (app *Application) initSync() (InitSyncResponse, error) {
 		}()
 		if err != nil {
 
-			r, err := app.showChoiceNotification("Failed to download remote database.\nUse local fallback?", map[string]string{"y": "Yes", "n": "Abort"})
+			r, err := app.showChoiceNotification("KeePassSync", "Failed to download remote database.\nUse local fallback?", map[string]string{"y": "Yes", "n": "Abort"})
 			if err != nil {
 				app.LogError("Failed to show choice notification", err)
 				return "", exerr.Wrap(err, "Failed to show choice notification").Build()
@@ -134,14 +135,20 @@ func (app *Application) runKeepass(fallback bool) {
 
 	cmd := exec.Command("keepassxc", filePath)
 
+	bgStop := make(chan bool, 128)
+
 	go func() {
 		select {
+		case <-bgStop:
+			return
 		case <-app.sigTermKeepassChan:
 			app.LogInfo("Received signal to terminate keepassxc")
 			if cmd != nil && cmd.Process != nil {
 				app.LogInfo(fmt.Sprintf("Terminating keepassxc %d", cmd.Process.Pid))
 				err := cmd.Process.Signal(syscall.SIGTERM)
-				if err != nil {
+				if errors.Is(err, os.ErrProcessDone) {
+					app.LogInfo("keepassxc already terminated")
+				} else if err != nil {
 					app.LogError("Failed to terminate keepassxc", err)
 				} else {
 					app.LogInfo("keepassxc terminated successfully")
@@ -163,6 +170,8 @@ func (app *Application) runKeepass(fallback bool) {
 	app.LogLine()
 
 	err = cmd.Wait()
+
+	bgStop <- true
 
 	exitErr := &exec.ExitError{}
 	if errors.As(err, &exitErr) {
@@ -208,8 +217,8 @@ func (app *Application) runSyncLoop() error {
 		case event := <-watcher.Events:
 			app.LogDebug(fmt.Sprintf("Received inotify event: [%s] %s", event.Op.String(), event.Name))
 
-			if !event.Has(fsnotify.Write) {
-				app.LogDebug("Ignoring event - not a write event")
+			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
+				app.LogDebug("Ignoring event - not a write|create event")
 				app.LogLine()
 				continue
 			}
@@ -240,9 +249,9 @@ func (app *Application) onDBFileChanged() {
 	defer fin1()
 
 	app.LogInfo("Database file was modified")
-	app.LogInfo(fmt.Sprintf("Sleeping for %d seconds", app.config.Debounce))
+	app.LogInfo(fmt.Sprintf("Sleeping for %d ms", app.config.Debounce))
 
-	time.Sleep(timeext.FromSeconds(app.config.Debounce))
+	time.Sleep(timeext.FromMilliseconds(app.config.Debounce))
 
 	state := app.readState()
 	localCS, err := app.calcLocalChecksum()
@@ -259,6 +268,10 @@ func (app *Application) onDBFileChanged() {
 		return
 	}
 
+	app.doDBUpload(state, fin1, true)
+}
+
+func (app *Application) doDBUpload(state *State, stateClear func(), allowConflictResolution bool) {
 	app.LogInfo("Uploading database to remote")
 
 	var eTagPtr *string = nil
@@ -267,9 +280,9 @@ func (app *Application) onDBFileChanged() {
 	}
 
 	etag, lm, sha, sz, err := app.uploadDatabase(eTagPtr)
-	if errors.Is(err, ETagConflictError) {
+	if errors.Is(err, ETagConflictError) && allowConflictResolution {
 
-		fin1()
+		stateClear()
 		fin2 := app.setTrayState("Uploading database (conflict", assets.IconUploadConflict)
 		defer fin2()
 
@@ -365,7 +378,38 @@ func (app *Application) onDBFileChanged() {
 		return
 	}
 
-	app.showSuccessNotification("KeePassSync: Error", "Uploaded database successfully")
+	app.showSuccessNotification("KeePassSync", "Uploaded database successfully")
 
 	app.LogLine()
+}
+
+func (app *Application) runFinalSync() {
+	app.masterLock.Lock()
+	app.uploadRunning.Wait(false)
+	app.uploadRunning.Set(true)
+	app.masterLock.Unlock()
+
+	defer app.uploadRunning.Set(false)
+
+	fin1 := app.setTrayState("Uploading database", assets.IconUpload)
+	defer fin1()
+
+	app.LogInfo("Starting final sync...")
+
+	state := app.readState()
+	localCS, err := app.calcLocalChecksum()
+	if err != nil {
+		app.LogError("Failed to calculate local database checksum", err)
+		app.showErrorNotification("KeePassSync: Error", "Failed to calculate local database checksum")
+		return
+	}
+
+	if state != nil && localCS == state.Checksum {
+		app.LogInfo("Local database still matches remote (via checksum) - no need to upload")
+		app.LogInfo(fmt.Sprintf("Checksum (remote/cached) := %s", state.Checksum))
+		app.LogInfo(fmt.Sprintf("Checksum (local)         := %s", localCS))
+		return
+	}
+
+	app.doDBUpload(state, fin1, false)
 }
