@@ -16,8 +16,8 @@ func (app *Application) initTray() {
 
 		systray.SetIcon(assets.IconInit)
 		systray.SetTitle("KeepassXC Sync")
-		app.currSysTrayTooltop = "Initializing..."
-		systray.SetTooltip(app.currSysTrayTooltop)
+		app.currSysTrayTooltip = "Initializing..."
+		systray.SetTooltip(app.currSysTrayTooltip)
 
 		miSync := systray.AddMenuItem("Sync Now (checked)", "")
 		miSyncForce := systray.AddMenuItem("Sync Now (forced)", "")
@@ -37,10 +37,10 @@ func (app *Application) initTray() {
 				select {
 				case <-miSync.ClickedCh:
 					app.LogDebug("SysTray: [Sync Now (checked)] clicked")
-					//TODO
+					go func() { app.runExplicitSync(false) }()
 				case <-miSyncForce.ClickedCh:
 					app.LogDebug("SysTray: [Sync Now (forced)] clicked")
-					//TODO
+					go func() { app.runExplicitSync(true) }()
 				case <-miShowLog.ClickedCh:
 					app.LogDebug("SysTray: [Show Log] clicked")
 					//TODO
@@ -94,8 +94,8 @@ func (app *Application) setTrayState(txt string, icon []byte) func() {
 		}
 
 		systray.SetIcon(assets.IconDefault)
-		app.currSysTrayTooltop = "Sleeping..."
-		systray.SetTooltip(app.currSysTrayTooltop)
+		app.currSysTrayTooltip = "Sleeping..."
+		systray.SetTooltip(app.currSysTrayTooltip)
 
 		finDone = true
 	}
@@ -124,6 +124,6 @@ func (app *Application) setTrayTooltip(txt string) {
 	defer app.masterLock.Unlock()
 
 	systray.SetTooltip(txt)
-	app.currSysTrayTooltop = txt
-	systray.SetTooltip(app.currSysTrayTooltop)
+	app.currSysTrayTooltip = txt
+	systray.SetTooltip(app.currSysTrayTooltip)
 }

@@ -67,6 +67,8 @@ func (app *Application) showChoiceNotification(msg string, body string, options 
 
 	bldr := cmdext.
 		Runner("notify-send").
+		Arg("--urgency=critical").
+		Arg("--expire-time=0").
 		Arg("--wait").
 		Arg("--app-name=kpsync")
 

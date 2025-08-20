@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/cryptext"
+	"git.blackforestbytes.com/BlackForestBytes/goext/dataext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
 	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
 )
@@ -18,7 +19,7 @@ var ETagConflictError = errors.New("ETag conflict")
 
 func (app *Application) downloadDatabase() (string, time.Time, string, int64, error) {
 
-	prevTT := app.currSysTrayTooltop
+	prevTT := app.currSysTrayTooltip
 	defer app.setTrayTooltip(prevTT)
 
 	client := http.Client{Timeout: 90 * time.Second}
@@ -67,6 +68,10 @@ func (app *Application) downloadDatabase() (string, time.Time, string, int64, er
 
 	sz := int64(len(bin))
 
+	app.masterLock.Lock()
+	app.fileWatcherIgnore = append(app.fileWatcherIgnore, dataext.NewTuple(time.Now(), sha))
+	app.masterLock.Unlock()
+
 	err = os.WriteFile(app.dbFile, bin, 0644)
 	if err != nil {
 		return "", time.Time{}, "", 0, exerr.Wrap(err, "Failed to write database file").Build()
@@ -75,7 +80,7 @@ func (app *Application) downloadDatabase() (string, time.Time, string, int64, er
 	return etag, lm, sha, sz, nil
 }
 
-func (app *Application) getRemoteETag() (string, time.Time, error) {
+func (app *Application) getRemoteState() (string, time.Time, error) {
 	client := http.Client{Timeout: 90 * time.Second}
 
 	req, err := http.NewRequest("HEAD", app.config.WebDAVURL, nil)
@@ -109,7 +114,7 @@ func (app *Application) getRemoteETag() (string, time.Time, error) {
 
 func (app *Application) uploadDatabase(etagIfMatch *string) (string, time.Time, string, int64, error) {
 
-	prevTT := app.currSysTrayTooltop
+	prevTT := app.currSysTrayTooltip
 	defer app.setTrayTooltip(prevTT)
 
 	client := http.Client{Timeout: 90 * time.Second}
@@ -176,7 +181,7 @@ func (app *Application) uploadDatabase(etagIfMatch *string) (string, time.Time, 
 
 func (app *Application) parseHeader(resp *http.Response) (string, time.Time, error) {
 	var err error
-	
+
 	etag := resp.Header.Get("ETag")
 	if etag == "" {
 		return "", time.Time{}, exerr.New(exerr.TypeInternal, "ETag header is missing").Build()

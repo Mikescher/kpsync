@@ -4,18 +4,25 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"sync"
 	"syscall"
 	"time"
 
 	"fyne.io/systray"
+	"git.blackforestbytes.com/BlackForestBytes/goext/dataext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/syncext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/termext"
+	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
 	"mikescher.com/kpsync/assets"
 )
 
 type Application struct {
 	masterLock sync.Mutex
+
+	logLock sync.Mutex
+	logFile *os.File // file to write logs to, if set
+	logList []dataext.Triple[string, string, func(string) string]
 
 	config Config
 
@@ -23,6 +30,8 @@ type Application struct {
 	uploadRunning   *syncext.AtomicBool
 	syncLoopRunning *syncext.AtomicBool
 	keepassRunning  *syncext.AtomicBool
+
+	fileWatcherIgnore []dataext.Tuple[time.Time, string]
 
 	sigKPExitChan     chan bool  // keepass exited
 	sigManualStopChan chan bool  // manual stop
@@ -34,7 +43,7 @@ type Application struct {
 	dbFile    string
 	stateFile string
 
-	currSysTrayTooltop string
+	currSysTrayTooltip string
 
 	trayItemChecksum     *systray.MenuItem
 	trayItemETag         *systray.MenuItem
@@ -45,10 +54,13 @@ func NewApplication() *Application {
 
 	app := &Application{
 		masterLock:          sync.Mutex{},
+		logLock:             sync.Mutex{},
+		logList:             make([]dataext.Triple[string, string, func(string) string], 0, 1024),
 		uploadRunning:       syncext.NewAtomicBool(false),
 		trayReady:           syncext.NewAtomicBool(false),
 		syncLoopRunning:     syncext.NewAtomicBool(false),
 		keepassRunning:      syncext.NewAtomicBool(false),
+		fileWatcherIgnore:   make([]dataext.Tuple[time.Time, string], 0, 128),
 		sigKPExitChan:       make(chan bool, 128),
 		sigManualStopChan:   make(chan bool, 128),
 		sigErrChan:          make(chan error, 128),
@@ -56,7 +68,9 @@ func NewApplication() *Application {
 		sigTermKeepassChan:  make(chan bool, 128),
 	}
 
-	app.LogInfo("Starting kpsync...")
+	app.LogInfo(fmt.Sprintf("Starting kpsync {%s} ...", time.Now().In(timeext.TimezoneBerlin).Format(time.RFC3339)))
+	app.LogLine()
+
 	app.LogDebug(fmt.Sprintf("SupportsColors := %v", termext.SupportsColors()))
 	app.LogLine()
 
@@ -65,6 +79,7 @@ func NewApplication() *Application {
 
 func (app *Application) Run() {
 	var configPath string
+	var err error
 
 	app.config, configPath = app.loadConfig()
 
@@ -77,6 +92,17 @@ func (app *Application) Run() {
 	app.LogDebug(fmt.Sprintf("Debounce      := %d ms", app.config.Debounce))
 	app.LogDebug(fmt.Sprintf("ForceColors   := %v", app.config.ForceColors))
 	app.LogLine()
+
+	app.logFile, err = os.OpenFile(path.Join(app.config.WorkDir, "kpsync.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		app.LogFatalErr("Failed to open log file", err)
+	}
+	defer func() {
+		if err := app.logFile.Close(); err != nil {
+			app.fallbackLog("Failed to close log file: " + err.Error())
+		}
+	}()
+	app.writeOutStartupLogs()
 
 	go func() { app.initTray() }()
 
@@ -106,7 +132,7 @@ func (app *Application) Run() {
 
 			app.setTrayStateDirect("Sleeping...", assets.IconDefault)
 
-			err = app.runSyncLoop()
+			err = app.runSyncWatcher()
 			if err != nil {
 				app.sigErrChan <- err
 				return

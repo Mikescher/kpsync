@@ -12,7 +12,6 @@ import (
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
 	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
-	"github.com/fsnotify/fsnotify"
 	"mikescher.com/kpsync/assets"
 )
 
@@ -49,7 +48,7 @@ func (app *Application) initSync() (InitSyncResponse, error) {
 		if err != nil {
 			app.LogError("Failed to calculate local database checksum", err)
 		} else if localCS == state.Checksum {
-			remoteETag, remoteLM, err := app.getRemoteETag()
+			remoteETag, remoteLM, err := app.getRemoteState()
 			if err != nil {
 				app.LogError("Failed to get remote ETag", err)
 			} else if remoteETag == state.ETag {
@@ -194,47 +193,6 @@ func (app *Application) runKeepass(fallback bool) {
 	app.sigKPExitChan <- true
 	return
 
-}
-
-func (app *Application) runSyncLoop() error {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		return exerr.Wrap(err, "failed to init file-watcher").Build()
-	}
-	defer func() { _ = watcher.Close() }()
-
-	err = watcher.Add(app.config.WorkDir)
-	if err != nil {
-		return exerr.Wrap(err, "").Build()
-	}
-
-	for {
-		select {
-		case <-app.sigSyncLoopStopChan:
-			app.LogInfo("Stopping sync loop (received signal)")
-			return nil
-
-		case event := <-watcher.Events:
-			app.LogDebug(fmt.Sprintf("Received inotify event: [%s] %s", event.Op.String(), event.Name))
-
-			if !event.Has(fsnotify.Write) && !event.Has(fsnotify.Create) {
-				app.LogDebug("Ignoring event - not a write|create event")
-				app.LogLine()
-				continue
-			}
-
-			if event.Name != app.dbFile {
-				app.LogDebug(fmt.Sprintf("Ignoring event - not the database file (%s)", app.dbFile))
-				app.LogLine()
-				continue
-			}
-
-			app.onDBFileChanged()
-
-		case err := <-watcher.Errors:
-			app.LogError("Filewatcher reported an error", err)
-		}
-	}
 }
 
 func (app *Application) onDBFileChanged() {
@@ -396,6 +354,11 @@ func (app *Application) runFinalSync() {
 
 	app.LogInfo("Starting final sync...")
 
+	remoteETag, _, err := app.getRemoteState()
+	if err != nil {
+		app.LogError("Failed to get remote ETag", err)
+	}
+
 	state := app.readState()
 	localCS, err := app.calcLocalChecksum()
 	if err != nil {
@@ -404,12 +367,56 @@ func (app *Application) runFinalSync() {
 		return
 	}
 
-	if state != nil && localCS == state.Checksum {
-		app.LogInfo("Local database still matches remote (via checksum) - no need to upload")
+	if state != nil && localCS == state.Checksum && remoteETag == state.ETag {
+		app.LogInfo("Local database still matches remote (via checksum+etag) - no need to upload")
 		app.LogInfo(fmt.Sprintf("Checksum (remote/cached) := %s", state.Checksum))
 		app.LogInfo(fmt.Sprintf("Checksum (local)         := %s", localCS))
+		app.LogDebug(fmt.Sprintf("ETag (local)            := %s", state.ETag))
+		app.LogDebug(fmt.Sprintf("ETag (remote)           := %s", remoteETag))
 		return
 	}
 
 	app.doDBUpload(state, fin1, false)
+}
+
+func (app *Application) runExplicitSync(force bool) {
+	app.masterLock.Lock()
+	app.uploadRunning.Wait(false)
+	app.uploadRunning.Set(true)
+	app.masterLock.Unlock()
+
+	defer app.uploadRunning.Set(false)
+
+	state := app.readState()
+
+	if !force {
+
+		remoteETag, _, err := app.getRemoteState()
+		if err != nil {
+			app.LogError("Failed to get remote ETag", err)
+			app.showErrorNotification("KeePassSync: Error", "Failed to get status from remote")
+			return
+		}
+
+		localCS, err := app.calcLocalChecksum()
+		if err != nil {
+			app.LogError("Failed to calculate local database checksum", err)
+			app.showErrorNotification("KeePassSync: Error", "Failed to calculate local database checksum")
+			return
+		}
+
+		if state != nil && localCS == state.Checksum {
+			app.LogInfo("Local database still matches remote (via checksum+etag) - no need to upload")
+			app.LogInfo(fmt.Sprintf("Checksum (remote/cached) := %s", state.Checksum))
+			app.LogInfo(fmt.Sprintf("Checksum (local)         := %s", localCS))
+			app.LogDebug(fmt.Sprintf("ETag (local)            := %s", state.ETag))
+			app.LogDebug(fmt.Sprintf("ETag (remote)           := %s", remoteETag))
+
+			app.showErrorNotification("KeePassSync", "No sync necessary - file is up-to-date with remote")
+			return
+		}
+
+	}
+
+	app.doDBUpload(state, func() {}, true)
 }
