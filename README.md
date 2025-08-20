@@ -8,13 +8,14 @@ A small util to launch keepassXC while the database file is on a remote webDAV s
 1. simply start `kpsync`
 2. On first start a example config in `~/.config/kpsync.json` will be created, probably needs to be edited
 3. Afterwards start it again
+4. You can access the logs, functionality, state etc via the tray icon
 
 # Functionality
 
 kpsync starts by downloading the latest db file from the webDAV to the (configured) temp directory  
 (if there already exists a local file, matching with the server version (via ETag), the download will be skipped)
 
-If teh download fails, teh user gets the option to open a local (fallback) file (e.g. if the computer has no network)
+If the download fails, the user gets the option to open a local (fallback) file (e.g. if the computer has no network)
 
 Then KeepassXC is launched.
 
@@ -43,3 +44,7 @@ Needs `keepassxc` to be installed. duh.
     "terminal_emulator": "konsole -e"
 }
 ```
+
+# Screenshot
+
+<img width="539" height="406" alt="image" src="https://github.com/user-attachments/assets/283ec720-d45d-412a-9be4-b92e9008c9ee" />
