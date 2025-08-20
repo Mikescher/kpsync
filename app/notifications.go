@@ -40,7 +40,7 @@ func (app *Application) showSuccessNotification(msg string, body string) {
 
 	res, err := cmdext.
 		Runner("notify-send").
-		Arg("--urgency=critical").
+		Arg("--urgency=normal").
 		Arg("--app-name=kpsync").
 		Arg("--print-id").
 		Arg(msg).

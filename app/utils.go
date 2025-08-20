@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/cryptext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
+	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
 	"github.com/shirou/gopsutil/v3/process"
 )
@@ -68,7 +70,7 @@ func (app *Application) saveState(eTag string, lastModified time.Time, checksum 
 	}
 
 	if app.trayItemChecksum != nil {
-		app.trayItemChecksum.SetTitle(fmt.Sprintf("Checksum: %s", checksum))
+		app.trayItemChecksum.SetTitle(fmt.Sprintf("Checksum: %s", langext.StrLimit(checksum, 16, "")))
 	}
 	if app.trayItemETag != nil {
 		app.trayItemETag.SetTitle(fmt.Sprintf("ETag: %s", eTag))
@@ -108,4 +110,9 @@ func (app *Application) isKeepassRunning() bool {
 	}
 
 	return false
+}
+
+func commandExists(cmd string) bool {
+	_, err := exec.LookPath(cmd)
+	return err == nil
 }

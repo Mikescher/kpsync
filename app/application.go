@@ -20,9 +20,10 @@ import (
 type Application struct {
 	masterLock sync.Mutex
 
-	logLock sync.Mutex
-	logFile *os.File // file to write logs to, if set
-	logList []dataext.Triple[string, string, func(string) string]
+	logLock        sync.Mutex
+	logFile        *os.File // file to write logs to, if set
+	logList        []LogMessage
+	logBroadcaster *dataext.PubSub[string, LogMessage]
 
 	config Config
 
@@ -55,7 +56,8 @@ func NewApplication() *Application {
 	app := &Application{
 		masterLock:          sync.Mutex{},
 		logLock:             sync.Mutex{},
-		logList:             make([]dataext.Triple[string, string, func(string) string], 0, 1024),
+		logList:             make([]LogMessage, 0, 1024),
+		logBroadcaster:      dataext.NewPubSub[string, LogMessage](128),
 		uploadRunning:       syncext.NewAtomicBool(false),
 		trayReady:           syncext.NewAtomicBool(false),
 		syncLoopRunning:     syncext.NewAtomicBool(false),

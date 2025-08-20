@@ -21,7 +21,8 @@ func (app *Application) initTray() {
 
 		miSync := systray.AddMenuItem("Sync Now (checked)", "")
 		miSyncForce := systray.AddMenuItem("Sync Now (forced)", "")
-		miShowLog := systray.AddMenuItem("Show Log", "")
+		miShowLogFifo := systray.AddMenuItem("Show Log (fifo)", "")
+		miShowLogFile := systray.AddMenuItem("Show Log (file)", "")
 		systray.AddMenuItem("", "")
 		app.trayItemChecksum = systray.AddMenuItem("Checksum: {...}", "")
 		app.trayItemETag = systray.AddMenuItem("ETag: {...}", "")
@@ -37,18 +38,27 @@ func (app *Application) initTray() {
 				select {
 				case <-miSync.ClickedCh:
 					app.LogDebug("SysTray: [Sync Now (checked)] clicked")
+					app.LogLine()
 					go func() { app.runExplicitSync(false) }()
 				case <-miSyncForce.ClickedCh:
 					app.LogDebug("SysTray: [Sync Now (forced)] clicked")
+					app.LogLine()
 					go func() { app.runExplicitSync(true) }()
-				case <-miShowLog.ClickedCh:
-					app.LogDebug("SysTray: [Show Log] clicked")
-					//TODO
+				case <-miShowLogFifo.ClickedCh:
+					app.LogDebug("SysTray: [Show Log Fifo] clicked")
+					app.LogLine()
+					go func() { app.openLogFifo() }()
+				case <-miShowLogFile.ClickedCh:
+					app.LogDebug("SysTray: [Show Log File] clicked")
+					app.LogLine()
+					go func() { app.openLogFile() }()
 				case <-miQuit.ClickedCh:
 					app.LogDebug("SysTray: [Quit] clicked")
+					app.LogLine()
 					app.sigManualStopChan <- true
 				case <-sigBGStop:
 					app.LogDebug("SysTray: Click-Listener goroutine stopped")
+					app.LogLine()
 					return
 
 				}

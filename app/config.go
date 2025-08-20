@@ -20,7 +20,8 @@ type Config struct {
 
 	WorkDir string `json:"work_dir"`
 
-	ForceColors bool `json:"force_colors"`
+	ForceColors      bool   `json:"force_colors"`
+	TerminalEmulator string `json:"terminal_emulator"`
 
 	Debounce int `json:"debounce"`
 }
@@ -44,11 +45,14 @@ func (app *Application) loadConfig() (Config, string) {
 	var workDir string
 	flag.StringVar(&workDir, "work_dir", "", "Temporary working directory")
 
-	var debounce int
-	flag.IntVar(&debounce, "debounce", 0, "Debounce before sync (in seconds)")
-
 	var forceColors bool
 	flag.BoolVar(&forceColors, "color", false, "Force color-output (default: auto-detect)")
+
+	var terminalEmulator string
+	flag.StringVar(&terminalEmulator, "terminal_emulator", "", "Command to start terminal-emulator, e.g. 'konsole -e'")
+
+	var debounce int
+	flag.IntVar(&debounce, "debounce", 0, "Debounce before sync (in seconds)")
 
 	flag.Parse()
 
@@ -63,14 +67,29 @@ func (app *Application) loadConfig() (Config, string) {
 	}
 
 	if _, err := os.Stat(configPath); os.IsNotExist(err) && configPath != "" {
+
+		te := ""
+		if commandExists("konsole") {
+			te = "konsole -e"
+		} else if commandExists("gnome-terminal") {
+			te = "gnome-terminal --"
+		} else if commandExists("xterm") {
+			te = "xterm -e"
+		} else if commandExists("x-terminal-emulator") {
+			te = "x-terminal-emulator -e"
+		} else {
+			app.LogError("Failed to determine terminal-emulator", nil)
+		}
+
 		_ = os.WriteFile(configPath, langext.Must(json.MarshalIndent(Config{
-			WebDAVURL:     "https://your-nextcloud-domain.example/remote.php/dav/files/keepass.kdbx",
-			WebDAVUser:    "",
-			WebDAVPass:    "",
-			LocalFallback: "",
-			WorkDir:       "/tmp/kpsync",
-			Debounce:      3500,
-			ForceColors:   false,
+			WebDAVURL:        "https://your-nextcloud-domain.example/remote.php/dav/files/keepass.kdbx",
+			WebDAVUser:       "",
+			WebDAVPass:       "",
+			LocalFallback:    "",
+			WorkDir:          "/tmp/kpsync",
+			Debounce:         3500,
+			ForceColors:      false,
+			TerminalEmulator: te,
 		}, "", "    ")), 0644)
 	}
 
@@ -105,6 +124,9 @@ func (app *Application) loadConfig() (Config, string) {
 	}
 	if forceColors {
 		cfg.ForceColors = forceColors
+	}
+	if terminalEmulator != "" {
+		cfg.TerminalEmulator = terminalEmulator
 	}
 
 	return cfg, configPath

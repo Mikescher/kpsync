@@ -63,6 +63,10 @@ func (app *Application) initSync() (InitSyncResponse, error) {
 				app.LogLine()
 				needsDownload = false
 
+				err = app.saveState(state.ETag, state.LastModified, state.Checksum, state.Size)
+				if err != nil {
+					app.LogError("Failed to save state", err)
+				}
 			}
 		}
 	}
@@ -412,7 +416,7 @@ func (app *Application) runExplicitSync(force bool) {
 			app.LogDebug(fmt.Sprintf("ETag (local)            := %s", state.ETag))
 			app.LogDebug(fmt.Sprintf("ETag (remote)           := %s", remoteETag))
 
-			app.showErrorNotification("KeePassSync", "No sync necessary - file is up-to-date with remote")
+			app.showSuccessNotification("KeePassSync", "No sync necessary - file is up-to-date with remote")
 			return
 		}
 
