@@ -60,9 +60,11 @@ func (app *Application) LogDebug(msg string) {
 	app.logInternal("[D]", msg, termext.Gray)
 }
 
-func (app *Application) logInternal(pf string, msg string, c func(_ string) string) {
+func (app *Application) logInternal(pf string, msg string, cf func(_ string) string) {
 	app.logLock.Lock()
 	defer app.logLock.Unlock()
+
+	c := cf
 
 	if !termext.SupportsColors() && !app.config.ForceColors {
 		c = func(s string) string { return s }
@@ -71,24 +73,24 @@ func (app *Application) logInternal(pf string, msg string, c func(_ string) stri
 	for i, s := range strings.Split(msg, "\n") {
 		if i == 0 {
 			println(c(pf + " " + s))
-			app.logList = append(app.logList, LogMessage{i, pf, s, c})
+			app.logList = append(app.logList, LogMessage{i, pf, s, cf})
 			if app.logFile != nil {
 				_, err := app.logFile.WriteString(pf + " " + s + "\n")
 				if err != nil {
 					app.fallbackLog("[!] Failed to write logfile: " + err.Error())
 				}
 			}
-			app.logBroadcaster.Publish("", LogMessage{i, pf, s, c})
+			app.logBroadcaster.Publish("", LogMessage{i, pf, s, cf})
 		} else {
 			println(c(langext.StrRepeat(" ", len(pf)+1) + s))
-			app.logList = append(app.logList, LogMessage{i, pf, s, c})
+			app.logList = append(app.logList, LogMessage{i, pf, s, cf})
 			if app.logFile != nil {
 				_, err := app.logFile.WriteString(langext.StrRepeat(" ", len(pf)+1) + s + "\n")
 				if err != nil {
 					app.fallbackLog("[!] Failed to write logfile: " + err.Error())
 				}
 			}
-			app.logBroadcaster.Publish("", LogMessage{i, pf, s, c})
+			app.logBroadcaster.Publish("", LogMessage{i, pf, s, cf})
 		}
 	}
 
