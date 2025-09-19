@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 
 	"fyne.io/systray"
 	"git.blackforestbytes.com/BlackForestBytes/goext/dataext"
+	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/syncext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/termext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
@@ -89,7 +91,7 @@ func (app *Application) Run() {
 	app.LogDebug(fmt.Sprintf("WebDAVURL     := '%s'", app.config.WebDAVURL))
 	app.LogDebug(fmt.Sprintf("WebDAVUser    := '%s'", app.config.WebDAVUser))
 	app.LogDebug(fmt.Sprintf("WebDAVPass    := '%s'", app.config.WebDAVPass))
-	app.LogDebug(fmt.Sprintf("LocalFallback := '%s'", app.config.LocalFallback))
+	app.LogDebug(fmt.Sprintf("LocalFallback := '%s'", langext.Coalesce(app.config.LocalFallback, "<null>")))
 	app.LogDebug(fmt.Sprintf("WorkDir       := '%s'", app.config.WorkDir))
 	app.LogDebug(fmt.Sprintf("Debounce      := %d ms", app.config.Debounce))
 	app.LogDebug(fmt.Sprintf("ForceColors   := %v", app.config.ForceColors))
@@ -107,6 +109,16 @@ func (app *Application) Run() {
 	app.writeOutStartupLogs()
 
 	go func() { app.initTray() }()
+
+	if app.config.LocalFallback != nil {
+		if _, err := os.Stat(*app.config.LocalFallback); errors.Is(err, os.ErrNotExist) {
+			app.config.LocalFallback = nil
+
+			app.LogError(fmt.Sprintf("Configured local-fallback '%s' not found - disabling.", *app.config.LocalFallback), nil)
+
+			app.showErrorNotification("Local fallback database not found", fmt.Sprintf("Configured local-fallback '%s' not found - fallback option won't be available.", *app.config.LocalFallback))
+		}
+	}
 
 	go func() {
 		app.syncLoopRunning.Set(true)
@@ -140,10 +152,10 @@ func (app *Application) Run() {
 				return
 			}
 
-		} else if isr == InitSyncResponseFallback {
+		} else if isr == InitSyncResponseFallback && app.config.LocalFallback != nil {
 
 			app.LogInfo(fmt.Sprintf("Starting KeepassXC with local fallback database (without sync loop!)"))
-			app.LogDebug(fmt.Sprintf("DB-Path := '%s'", app.config.LocalFallback))
+			app.LogDebug(fmt.Sprintf("DB-Path := '%s'", *app.config.LocalFallback))
 
 			go func() {
 				app.keepassRunning.Set(true)

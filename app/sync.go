@@ -30,7 +30,18 @@ func (app *Application) initSync() (InitSyncResponse, error) {
 		return "", exerr.Wrap(err, "").Build()
 	}
 
-	app.dbFile = path.Join(app.config.WorkDir, path.Base(app.config.LocalFallback))
+	fn := ""
+	if app.config.LocalFallback != nil {
+		fn = path.Base(*app.config.LocalFallback)
+	}
+	if fn == "" || fn == "." || fn == "/" || fn == "\\" {
+		fn = path.Base(app.config.WebDAVURL)
+	}
+	if fn == "" || fn == "." || fn == "/" || fn == "\\" {
+		fn = "database.kdbx"
+	}
+
+	app.dbFile = path.Join(app.config.WorkDir, fn)
 	app.stateFile = path.Join(app.config.WorkDir, "kpsync.state")
 
 	if app.isKeepassRunning() {
@@ -102,18 +113,27 @@ func (app *Application) initSync() (InitSyncResponse, error) {
 		}()
 		if err != nil {
 
-			r, err := app.showChoiceNotification("KeePassSync", "Failed to download remote database.\nUse local fallback?", map[string]string{"y": "Yes", "n": "Abort"})
-			if err != nil {
-				app.LogError("Failed to show choice notification", err)
-				return "", exerr.Wrap(err, "Failed to show choice notification").Build()
-			}
+			if app.config.LocalFallback != nil {
 
-			if r == "y" {
-				return InitSyncResponseFallback, nil
-			} else if r == "n" {
-				return InitSyncResponseAbort, nil
+				r, err := app.showChoiceNotification("KeePassSync", "Failed to download remote database.\nUse local fallback?", map[string]string{"y": "Yes", "n": "Abort"})
+				if err != nil {
+					app.LogError("Failed to show choice notification", err)
+					return "", exerr.Wrap(err, "Failed to show choice notification").Build()
+				}
+
+				if r == "y" {
+					return InitSyncResponseFallback, nil
+				} else if r == "n" {
+					return InitSyncResponseAbort, nil
+				} else {
+					return "", exerr.Wrap(err, "").Build()
+				}
+
 			} else {
-				return "", exerr.Wrap(err, "").Build()
+
+				app.showErrorNotification("KeePassSync", "Failed to download remote database.")
+				return InitSyncResponseAbort, nil
+
 			}
 
 		}
@@ -133,7 +153,13 @@ func (app *Application) runKeepass(fallback bool) {
 
 	filePath := app.dbFile
 	if fallback {
-		filePath = app.config.LocalFallback
+		if app.config.LocalFallback == nil {
+			app.LogError("No local fallback database configured", nil)
+			app.sigErrChan <- exerr.New(exerr.TypeInternal, "No local fallback database configured").Build()
+			return
+		}
+
+		filePath = *app.config.LocalFallback
 	}
 
 	cmd := exec.Command("keepassxc", filePath)

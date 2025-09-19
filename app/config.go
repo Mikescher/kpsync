@@ -16,7 +16,7 @@ type Config struct {
 	WebDAVUser string `json:"webdav_user"`
 	WebDAVPass string `json:"webdav_pass"`
 
-	LocalFallback string `json:"local_fallback"`
+	LocalFallback *string `json:"local_fallback"`
 
 	WorkDir string `json:"work_dir"`
 
@@ -85,7 +85,7 @@ func (app *Application) loadConfig() (Config, string) {
 			WebDAVURL:        "https://your-nextcloud-domain.example/remote.php/dav/files/keepass.kdbx",
 			WebDAVUser:       "",
 			WebDAVPass:       "",
-			LocalFallback:    "",
+			LocalFallback:    nil,
 			WorkDir:          "/tmp/kpsync",
 			Debounce:         3500,
 			ForceColors:      false,
@@ -114,7 +114,7 @@ func (app *Application) loadConfig() (Config, string) {
 		cfg.WebDAVPass = webdavPass
 	}
 	if localFallback != "" {
-		cfg.LocalFallback = localFallback
+		cfg.LocalFallback = &localFallback
 	}
 	if workDir != "" {
 		cfg.WorkDir = workDir
