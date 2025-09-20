@@ -13,6 +13,7 @@ import (
 	"fyne.io/systray"
 	"git.blackforestbytes.com/BlackForestBytes/goext/dataext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
+	"git.blackforestbytes.com/BlackForestBytes/goext/mathext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/syncext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/termext"
 	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
@@ -30,7 +31,8 @@ type Application struct {
 	config Config
 
 	trayReady       *syncext.AtomicBool
-	uploadRunning   *syncext.AtomicBool
+	uploadWaiting   *syncext.AtomicBool
+	uploadActive    *syncext.AtomicBool
 	syncLoopRunning *syncext.AtomicBool
 	keepassRunning  *syncext.AtomicBool
 
@@ -48,6 +50,8 @@ type Application struct {
 
 	currSysTrayTooltip string
 
+	uploadDCI *dataext.DelayedCombiningInvoker
+
 	trayItemChecksum     *systray.MenuItem
 	trayItemETag         *systray.MenuItem
 	trayItemLastModified *systray.MenuItem
@@ -60,7 +64,8 @@ func NewApplication() *Application {
 		logLock:             sync.Mutex{},
 		logList:             make([]LogMessage, 0, 1024),
 		logBroadcaster:      dataext.NewPubSub[string, LogMessage](128),
-		uploadRunning:       syncext.NewAtomicBool(false),
+		uploadWaiting:       syncext.NewAtomicBool(false),
+		uploadActive:        syncext.NewAtomicBool(false),
 		trayReady:           syncext.NewAtomicBool(false),
 		syncLoopRunning:     syncext.NewAtomicBool(false),
 		keepassRunning:      syncext.NewAtomicBool(false),
@@ -119,6 +124,12 @@ func (app *Application) Run() {
 			app.showErrorNotification("Local fallback database not found", fmt.Sprintf("Configured local-fallback '%s' not found - fallback option won't be available.", *app.config.LocalFallback))
 		}
 	}
+
+	debounce := timeext.FromMilliseconds(app.config.Debounce)
+	app.uploadDCI = dataext.NewDelayedCombiningInvoker(app.runDBUpload, debounce, mathext.Max(45*time.Second, debounce*3))
+
+	app.uploadDCI.RegisterOnRequest(func(_ int, _ bool) { app.uploadWaiting.Set(app.uploadDCI.HasPendingRequests()) })
+	app.uploadDCI.RegisterOnExecutionDone(func() { app.uploadWaiting.Set(app.uploadDCI.HasPendingRequests()) })
 
 	go func() {
 		app.syncLoopRunning.Set(true)
@@ -227,9 +238,14 @@ func (app *Application) stopBackgroundRoutines() {
 	app.trayReady.Wait(false)
 	app.LogDebug("Stopped systray.")
 
-	if app.uploadRunning.Get() {
+	if app.uploadWaiting.Get() {
+		app.LogInfo("Triggering pending upload immediately...")
+		app.uploadDCI.ExecuteNow()
+	}
+
+	if app.uploadActive.Get() {
 		app.LogInfo("Waiting for active upload...")
-		app.uploadRunning.Wait(false)
+		app.uploadActive.Wait(false)
 		app.LogInfo("Upload finished.")
 	}
 

@@ -11,7 +11,6 @@ import (
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
 	"git.blackforestbytes.com/BlackForestBytes/goext/langext"
-	"git.blackforestbytes.com/BlackForestBytes/goext/timeext"
 	"mikescher.com/kpsync/assets"
 )
 
@@ -225,21 +224,16 @@ func (app *Application) runKeepass(fallback bool) {
 
 }
 
-func (app *Application) onDBFileChanged() {
-	app.masterLock.Lock()
-	app.uploadRunning.Wait(false)
-	app.uploadRunning.Set(true)
-	app.masterLock.Unlock()
+func (app *Application) runDBUpload() {
+	app.uploadWaiting.Set(false)
 
-	defer app.uploadRunning.Set(false)
+	app.uploadActive.Set(true)
+	defer app.uploadActive.Set(false)
 
 	fin1 := app.setTrayState("Uploading database", assets.IconUpload)
 	defer fin1()
 
-	app.LogInfo("Database file was modified")
-	app.LogInfo(fmt.Sprintf("Sleeping for %d ms", app.config.Debounce))
-
-	time.Sleep(timeext.FromMilliseconds(app.config.Debounce))
+	app.LogInfo("Starting upload-check")
 
 	state := app.readState()
 	localCS, err := app.calcLocalChecksum()
@@ -373,11 +367,11 @@ func (app *Application) doDBUpload(state *State, stateClear func(), allowConflic
 
 func (app *Application) runFinalSync() {
 	app.masterLock.Lock()
-	app.uploadRunning.Wait(false)
-	app.uploadRunning.Set(true)
+	app.uploadDCI.CancelPendingRequests()
+	app.uploadActive.Wait(false)
+	app.uploadActive.Set(true)
+	defer app.uploadActive.Set(false)
 	app.masterLock.Unlock()
-
-	defer app.uploadRunning.Set(false)
 
 	fin1 := app.setTrayState("Uploading database", assets.IconUpload)
 	defer fin1()
@@ -411,11 +405,11 @@ func (app *Application) runFinalSync() {
 
 func (app *Application) runExplicitSync(force bool) {
 	app.masterLock.Lock()
-	app.uploadRunning.Wait(false)
-	app.uploadRunning.Set(true)
+	app.uploadDCI.CancelPendingRequests()
+	app.uploadActive.Wait(false)
+	app.uploadActive.Set(true)
+	defer app.uploadActive.Set(false)
 	app.masterLock.Unlock()
-
-	defer app.uploadRunning.Set(false)
 
 	state := app.readState()
 

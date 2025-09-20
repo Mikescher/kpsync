@@ -6,6 +6,7 @@ import (
 
 	"git.blackforestbytes.com/BlackForestBytes/goext/exerr"
 	"github.com/fsnotify/fsnotify"
+	"mikescher.com/kpsync/assets"
 )
 
 func (app *Application) runSyncWatcher() error {
@@ -61,7 +62,10 @@ func (app *Application) runSyncWatcher() error {
 				continue
 			}
 
-			app.onDBFileChanged()
+			app.uploadWaiting.Set(true)
+			app.setTrayStateDirect("Uploading database (waiting)", assets.IconUpload)
+			app.LogInfo(fmt.Sprintf("Database file was modified - requesting upload (currently %d pending requests)", app.uploadDCI.CountPendingRequests()))
+			app.uploadDCI.Request()
 
 		case err := <-watcher.Errors:
 			app.LogError("Filewatcher reported an error", err)
