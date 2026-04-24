@@ -117,11 +117,11 @@ func (app *Application) Run() {
 
 	if app.config.LocalFallback != nil {
 		if _, err := os.Stat(*app.config.LocalFallback); errors.Is(err, os.ErrNotExist) {
-			app.config.LocalFallback = nil
 
 			app.LogError(fmt.Sprintf("Configured local-fallback '%s' not found - disabling.", *app.config.LocalFallback), nil)
-
 			app.showErrorNotification("Local fallback database not found", fmt.Sprintf("Configured local-fallback '%s' not found - fallback option won't be available.", *app.config.LocalFallback))
+
+			app.config.LocalFallback = nil
 		}
 	}
 

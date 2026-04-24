@@ -18,7 +18,6 @@ enums:
 package:
 	#
 	# Manually do beforehand:
-	#   - Update version in version.go
 	#   - Create tag
 	#   - Commit
 	#
